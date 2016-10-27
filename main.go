@@ -91,7 +91,7 @@ func serve(network *net.IPNet, port int) {
 
 	for {
 		buffer := make([]byte, 1024)
-		length, remote, err := connection.ReadFrom(buffer[:])
+		length, remote, err := connection.ReadFrom(buffer)
 		if err != nil {
 			panic(err)
 		}
