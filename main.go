@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -24,9 +24,9 @@ Usage:
   cure --version
 
 Options:
-  -p --port <port>  Specify port.
-  -h --help        Show this screen.
-  --version       Show version.
+  -p --port <port>  Specify port [default: 12345].
+  -h --help         Show this screen.
+  --version         Show version.
 `
 )
 
@@ -42,80 +42,77 @@ type Peer struct {
 }
 
 type PresenceMessage struct {
-	Address string
-	Clock   int64
+	Date int64 `json:"date"`
 }
 
 func main() {
 	args := godocs.MustParse(usage, version, godocs.UsePager)
 
-	fmt.Printf("XXXXXX main.go:47 args: %#v\n", args)
+	var (
+		port, _ = strconv.Atoi(args["--port"].(string))
+	)
 
-	listenAddresses := []*net.UDPAddr{}
-
-	for _, ip := range getNonLocalIPs() {
-		if ip.To4() == nil {
+	workers := &sync.WaitGroup{}
+	for _, network := range getNetworks() {
+		if network.IP.To4() == nil {
 			continue
 		}
 
-		listenAddresses = append(listenAddresses, &net.UDPAddr{
-			IP:   ip,
-			Port: 12345,
-		})
+		workers.Add(1)
+		go serve(network, port)
 	}
 
-	//dpMessages := make(chan []byte, 0)
+	workers.Wait()
+}
 
-	waitGroup := sync.WaitGroup{}
-	for _, address := range listenAddresses {
-		waitGroup.Add(1)
+func serve(network *net.IPNet, port int) {
+	address := &net.UDPAddr{
+		IP:   network.IP,
+		Port: port,
+	}
 
-		go func(address *net.UDPAddr) {
-			connection, err := net.ListenUDP("udp4", address)
+	connection, err := net.ListenPacket("udp", address.String())
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		address := getBroadcastAddress(network)
+
+		for {
+			err = broadcast(connection, address)
 			if err != nil {
 				panic(err)
 			}
 
-			go func() {
-				for {
-					broadcast(connection)
-					time.Sleep(time.Second)
-				}
+			time.Sleep(time.Second)
+		}
+	}()
 
-			}()
+	for {
+		buffer := make([]byte, 1024)
+		length, remote, err := connection.ReadFrom(buffer[:])
+		if err != nil {
+			panic(err)
+		}
 
-			for {
-				fmt.Printf("XXXXXX main.go:87 11: %#v\n", 11)
-				buffer := make([]byte, 1024)
-				connection.ReadFromUDP(buffer)
-				log.Printf("main.go:45 %#v", buffer)
-			}
-		}(address)
+		fmt.Printf("XXXXXX %s: %s\n", remote, buffer[:length])
 	}
-
-	waitGroup.Wait()
 }
 
-func broadcast(connection *net.UDPConn) error {
-	udpAddr := connection.LocalAddr().(*net.UDPAddr)
-
-	addr := getBroadcastAddress(
-		&net.IPNet{
-			IP:   udpAddr.IP,
-			Mask: udpAddr.IP.DefaultMask(),
-		},
-	)
-
+func broadcast(connection net.PacketConn, address net.IP) error {
 	message := PresenceMessage{}
-	message.Address = udpAddr.String()
-	message.Clock = time.Now().UnixNano()
+	message.Date = time.Now().UnixNano()
 
-	fmt.Printf("XXXXXX main.go:111 addr: %s\n", addr)
+	fmt.Printf("XXXXXX brcast: %v\n", message)
 
-	connection.WriteToUDP(encode(message), &net.UDPAddr{
-		IP:   addr,
-		Port: udpAddr.Port,
+	_, err := connection.WriteTo(encode(message), &net.UDPAddr{
+		IP:   address,
+		Port: connection.LocalAddr().(*net.UDPAddr).Port,
 	})
+	if err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -136,8 +133,8 @@ func encode(message interface{}) []byte {
 	return encoded
 }
 
-func getNonLocalIPs() []net.IP {
-	nonLocalIPs := []net.IP{}
+func getNetworks() []*net.IPNet {
+	networks := []*net.IPNet{}
 
 	addresses, _ := net.InterfaceAddrs()
 	for _, address := range addresses {
@@ -145,8 +142,8 @@ func getNonLocalIPs() []net.IP {
 			continue
 		}
 
-		nonLocalIPs = append(nonLocalIPs, address.(*net.IPNet).IP)
+		networks = append(networks, address.(*net.IPNet))
 	}
 
-	return nonLocalIPs
+	return networks
 }
