@@ -1,0 +1,77 @@
+#!/bin/bash
+
+set -euo pipefail
+
+cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"/../
+
+source "vendor/github.com/reconquest/import.bash/import.bash"
+
+import:source "github.com/reconquest/hastur.bash"
+import:source "github.com/reconquest/containers.bash"
+import:source "github.com/reconquest/progress.bash"
+import:source "github.com/reconquest/test-runner.bash"
+import:source "github.com/reconquest/tests.sh"
+import:source "github.com/reconquest/go-test.bash"
+import:source "github.com/reconquest/ssh-test.bash"
+
+import:include build.sh
+import:include cure.sh
+import:include deps.sh
+
+:deps:check
+
+test-runner:set-custom-opts \
+    --keep-containers \
+    --keep-images \
+    --containers-count:
+
+test-runner:handle-custom-opt() {
+    case "$1" in
+        --keep-containers)
+            containers:keep-containers
+            hastur:keep-images
+            ;;
+
+        --keep-images)
+            hastur:keep-images
+            ;;
+
+        --containers-count)
+            containers:set-count "$2"
+            ;;
+    esac
+}
+
+progress:spinner:new _progress_spinner
+
+test-runner:progress() {
+    if [ "${1:-}" = "stop" ]; then
+        printf " ok."
+    else
+        progress:spinner:spin "$_progress_spinner" > /dev/null
+    fi
+}
+
+:init() {
+    go-test:set-output-dir "$(readlink -f .)"
+    go-test:build cure
+
+    hastur:init openssh,pam,util-linux,tar,iproute2,sudo,sed
+}
+
+:cleanup() {
+    containers:wipe
+
+    hastur:destroy-root
+
+    progress:spinner:stop "$_progress_spinner"
+
+    go-test:merge-coverage
+}
+
+:init 2> >(progress:spinner:spin "$_progress_spinner" > /dev/null)
+
+exit 3
+trap :cleanup EXIT
+
+test-runner:run "${@}"
