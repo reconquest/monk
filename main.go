@@ -3,13 +3,18 @@ package main
 import (
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"net"
+	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/kovetskiy/godocs"
+	"github.com/kovetskiy/lorg"
+	"github.com/reconquest/colorgful"
+)
+
+var (
+	exit = os.Exit
 )
 
 var (
@@ -31,19 +36,12 @@ Options:
 )
 
 var (
-	heartbeatInterval = 50
+	heartbeatInterval = time.Millisecond * 300
 )
 
-type Peer struct {
-	Addr      net.IPAddr
-	Port      int
-	Source    net.IPAddr
-	Timestamp time.Time
-}
-
-type PresenceMessage struct {
-	Date int64 `json:"date"`
-}
+var (
+	logger = lorg.NewLog()
+)
 
 func main() {
 	args := godocs.MustParse(usage, version, godocs.UsePager)
@@ -52,72 +50,51 @@ func main() {
 		port, _ = strconv.Atoi(args["--port"].(string))
 	)
 
-	workers := &sync.WaitGroup{}
+	logger.SetFormat(
+		colorgful.MustApplyDefaultTheme(
+			"${time} ${level:%s:left} ${prefix}%s",
+			colorgful.Default,
+		),
+	)
+
+	logger.SetLevel(lorg.LevelDebug)
+
+	peers := []*Peer{}
 	for _, network := range getNetworks() {
 		if network.IP.To4() == nil {
 			continue
 		}
 
-		workers.Add(1)
-		go serve(network, port)
-	}
+		peer := NewPeer(
+			network,
+			port,
+			logger.NewChildWithPrefix(""+network.String()+":"),
+		)
 
-	workers.Wait()
-}
-
-func serve(network *net.IPNet, port int) {
-	address := &net.UDPAddr{
-		IP:   network.IP,
-		Port: port,
-	}
-
-	connection, err := net.ListenPacket("udp", address.String())
-	if err != nil {
-		panic(err)
-	}
-
-	go func() {
-		address := getBroadcastAddress(network)
-
-		for {
-			err = broadcast(connection, address)
-			if err != nil {
-				panic(err)
-			}
-
-			time.Sleep(time.Second)
-		}
-	}()
-
-	for {
-		buffer := make([]byte, 1024)
-		length, remote, err := connection.ReadFrom(buffer)
+		err := peer.connect()
 		if err != nil {
-			panic(err)
+			fatalh(err, "unable to establish connection using %s", network)
 		}
 
-		fmt.Printf("XXXXXX %s: %s\n", remote, buffer[:length])
-	}
-}
-
-func broadcast(connection net.PacketConn, address net.IP) error {
-	message := PresenceMessage{}
-	message.Date = time.Now().UnixNano()
-
-	fmt.Printf("XXXXXX brcast: %v\n", message)
-
-	_, err := connection.WriteTo(encode(message), &net.UDPAddr{
-		IP:   address,
-		Port: connection.LocalAddr().(*net.UDPAddr).Port,
-	})
-	if err != nil {
-		return err
+		peers = append(peers, peer)
 	}
 
-	return nil
+	for _, peer := range peers {
+		go peer.observe()
+	}
+
+	for _, peer := range peers {
+		go func(peer *Peer) {
+			for range time.Tick(heartbeatInterval) {
+				peer.heartbeat()
+			}
+		}(peer)
+	}
+
+	select {}
 }
 
-func getBroadcastAddress(network *net.IPNet) net.IP {
+func getBroadcastIP(network *net.IPNet) net.IP {
 	ip := make(net.IP, len(network.IP.To4()))
 	binary.BigEndian.PutUint32(
 		ip,
