@@ -1,13 +1,22 @@
 package main
 
-type Packetable interface {
-	Signature() []byte
+import (
+	"encoding/json"
+)
+
+type Serializable interface {
+	Serialize() []byte
 }
 
-type PacketHere struct {
-	Network string `json:"net"`
+type PacketLight struct {
+	Network []string `json:"network"`
 }
 
-func (here PacketHere) Signature() []byte {
-	return []byte{'H', 'E', 'R', 'E'}
+func (packet PacketLight) Serialize() []byte {
+	marshaled, err := json.Marshal(packet)
+	if err != nil {
+		panic(err)
+	}
+
+	return marshaled
 }

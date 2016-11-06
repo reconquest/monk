@@ -59,9 +59,9 @@ func main() {
 		port, _ = strconv.Atoi(args["--port"].(string))
 	)
 
-	peer := NewPeer(port)
+	monk := NewMonk(port)
 
-	err := peer.bind()
+	err := monk.bind()
 	if err != nil {
 		fatalln(err)
 	}
@@ -71,16 +71,16 @@ func main() {
 			continue
 		}
 
-		peer.addNetwork(network)
+		monk.addNetwork(network)
 	}
 
 	time.Sleep(time.Second)
 
-	go peer.observe()
+	go monk.observe()
 
 	go func() {
 		for range time.Tick(heartbeatInterval) {
-			peer.heartbeat()
+			monk.heartbeat()
 		}
 	}()
 
