@@ -27,6 +27,7 @@ type Monk struct {
 	networks []*net.IPNet
 
 	peers   []Peer
+	seeds   []Peer
 	seeding bool
 }
 
