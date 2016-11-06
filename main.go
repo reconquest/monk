@@ -46,10 +46,6 @@ var (
 func main() {
 	args := godocs.MustParse(usage, version, godocs.UsePager)
 
-	var (
-		port, _ = strconv.Atoi(args["--port"].(string))
-	)
-
 	logger.SetFormat(
 		colorgful.MustApplyDefaultTheme(
 			"${time} ${level:%s:left} ${prefix}%s",
@@ -59,37 +55,34 @@ func main() {
 
 	logger.SetLevel(lorg.LevelDebug)
 
-	peers := []*Peer{}
+	var (
+		port, _ = strconv.Atoi(args["--port"].(string))
+	)
+
+	peer := NewPeer(port)
+
+	err := peer.bind()
+	if err != nil {
+		fatalln(err)
+	}
+
 	for _, network := range getNetworks() {
 		if network.IP.To4() == nil {
 			continue
 		}
 
-		peer := NewPeer(
-			network,
-			port,
-			logger.NewChildWithPrefix(""+network.String()+":"),
-		)
+		peer.addNetwork(network)
+	}
 
-		err := peer.connect()
-		if err != nil {
-			fatalh(err, "unable to establish connection using %s", network)
+	time.Sleep(time.Second)
+
+	go peer.observe()
+
+	go func() {
+		for range time.Tick(heartbeatInterval) {
+			peer.heartbeat()
 		}
-
-		peers = append(peers, peer)
-	}
-
-	for _, peer := range peers {
-		go peer.observe()
-	}
-
-	for _, peer := range peers {
-		go func(peer *Peer) {
-			for range time.Tick(heartbeatInterval) {
-				peer.heartbeat()
-			}
-		}(peer)
-	}
+	}()
 
 	select {}
 }

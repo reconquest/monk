@@ -5,7 +5,6 @@ import (
 	"net"
 	"strconv"
 
-	"github.com/kovetskiy/lorg"
 	"github.com/reconquest/ser-go"
 )
 
@@ -15,53 +14,28 @@ var (
 )
 
 type Peer struct {
-	network    *net.IPNet
+	networks   []*net.IPNet
 	port       int
 	connection net.PacketConn
-	address    *net.UDPAddr
-
-	broadcastAddress *net.UDPAddr
-
-	log lorg.Logger
 }
 
-func NewPeer(network *net.IPNet, port int, logger lorg.Logger) *Peer {
-	return &Peer{
-		network: network,
-		port:    port,
-		log:     logger,
-	}
+func NewPeer(port int) *Peer {
+	return &Peer{port: port}
 }
 
-func (peer *Peer) connect() error {
-	proto := "udp4"
-	if peer.network.IP.To4() == nil {
-		proto = "udp6"
-	}
+func (peer *Peer) addNetwork(network *net.IPNet) {
+	peer.networks = append(peer.networks, network)
+}
 
-	address := &net.UDPAddr{
-		IP:   peer.network.IP,
-		Port: peer.port,
-	}
-
-	peer.log.Infof("listen %s", address)
-
-	connection, err := net.ListenPacket(proto, address.String())
+func (peer *Peer) bind() error {
+	connection, err := net.ListenPacket("udp", ":"+strconv.Itoa(peer.port))
 	if err != nil {
-		return ser.Errorf(
-			err, "can't listen: %s (%s)",
-			address.String(), proto,
-		)
+		return err
 	}
+
+	infof("listening at :%d", peer.port)
 
 	peer.connection = connection
-	peer.address = address
-	peer.broadcastAddress = &net.UDPAddr{
-		IP:   getBroadcastIP(peer.network),
-		Port: peer.port,
-	}
-
-	peer.log.Infof("connection has been established")
 
 	return nil
 }
@@ -75,9 +49,7 @@ func (peer *Peer) observe() {
 	for {
 		remote, packet, err := peer.read()
 		if err != nil {
-			peer.log.Error(
-				ser.Errorf(err, "unable to read packet"),
-			)
+			errorh(err, "unable to read packet")
 
 			continue
 		}
@@ -92,24 +64,18 @@ func (peer *Peer) heartbeat() {
 		"heartbeat without network connection",
 	)
 
-	packet := PacketHere{
-		Network: peer.network.String(),
-	}
+	packet := PacketHere{}
 
 	data, err := serialize(packet)
 	if err != nil {
-		peer.log.Error(
-			ser.Errorf(err, "can't serialize packet: %#v", packet),
-		)
+		errorh(err, "can't serialize packet: %#v", packet)
 
 		return
 	}
 
 	err = peer.broadcast(data)
 	if err != nil {
-		peer.log.Error(
-			ser.Errorf(err, "can't broadcast packet: %v", data),
-		)
+		errorh(err, "can't broadcast packet: %v", data)
 		return
 	}
 }
@@ -126,20 +92,30 @@ func (peer *Peer) read() (net.Addr, []byte, error) {
 }
 
 func (peer *Peer) handle(remote net.Addr, packet []byte) error {
-	peer.log.Debugf("remote: %s; packet: %s", remote, string(packet))
-
-	if peer.address.String() == remote.String() {
-		peer.log.Debugf("skipping owned packet")
-	}
+	debugf("remote: %s; packet: %s", remote, string(packet))
 
 	return nil
 }
 
 func (peer *Peer) broadcast(packet []byte) error {
-	peer.log.Debugf("broadcasting to %s", peer.broadcastAddress.String())
+	for _, network := range peer.networks {
+		address := getBroadcastIP(network)
 
-	_, err := peer.connection.WriteTo(packet, peer.broadcastAddress)
-	return err
+		debugf("broadcasting to %s", address)
+
+		_, err := peer.connection.WriteTo(
+			packet,
+			&net.UDPAddr{IP: address, Port: peer.port},
+		)
+		if err != nil {
+			return ser.Errorf(
+				err, "can't broadcast to %s:%d (network: %s)",
+				address, peer.port, network,
+			)
+		}
+	}
+
+	return nil
 }
 
 func serialize(packet Packetable) ([]byte, error) {
