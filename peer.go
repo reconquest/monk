@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	packetMaxSize   = 1024
-	packetSignature = []byte{'C', 'U', 'R', 'E', 0}
+	packetMaxSize = 1024
+	packetPrefix  = []byte{'C', 'U', 'R', 'E'}
 )
 
 type Peer struct {
@@ -92,20 +92,26 @@ func (peer *Peer) heartbeat() {
 		"heartbeat without network connection",
 	)
 
-	packet := PacketPresence{
+	packet := PacketHere{
 		Network: peer.network.String(),
 	}
 
-	data, err := encodePacket(packet)
+	data, err := serialize(packet)
 	if err != nil {
 		peer.log.Error(
-			ser.Errorf(err, "can't encode packet: %#v", packet),
+			ser.Errorf(err, "can't serialize packet: %#v", packet),
 		)
 
 		return
 	}
 
-	peer.broadcast(data)
+	err = peer.broadcast(data)
+	if err != nil {
+		peer.log.Error(
+			ser.Errorf(err, "can't broadcast packet: %v", data),
+		)
+		return
+	}
 }
 
 func (peer *Peer) read() (net.Addr, []byte, error) {
@@ -120,7 +126,7 @@ func (peer *Peer) read() (net.Addr, []byte, error) {
 }
 
 func (peer *Peer) handle(remote net.Addr, packet []byte) error {
-	peer.log.Debugf("remote: %s; packet: %s", remote, packet)
+	peer.log.Debugf("remote: %s; packet: %s", remote, string(packet))
 
 	if peer.address.String() == remote.String() {
 		peer.log.Debugf("skipping owned packet")
@@ -130,28 +136,31 @@ func (peer *Peer) handle(remote net.Addr, packet []byte) error {
 }
 
 func (peer *Peer) broadcast(packet []byte) error {
+	peer.log.Debugf("broadcasting to %s", peer.broadcastAddress.String())
+
 	_, err := peer.connection.WriteTo(packet, peer.broadcastAddress)
 	return err
 }
 
-func encodePacket(data interface{}) ([]byte, error) {
-	packet, err := json.Marshal(data)
+func serialize(packet Packetable) ([]byte, error) {
+	marshaled, err := json.Marshal(packet)
 	if err != nil {
 		return nil, err
 	}
 
-	packet = signPacket(packet)
+	body := []byte{}
+	body = append(body, packet.Signature()...)
+	body = append(body, byte(0))
+	body = append(body, marshaled...)
 
-	return packet, nil
-}
+	size := []byte(strconv.Itoa(len(body)))
 
-func signPacket(packet []byte) []byte {
 	data := []byte{}
-
-	data = append(data, packetSignature...)
-	data = append(data, []byte(strconv.Itoa(len(packet)))...)
+	data = append(data, packetPrefix...)
 	data = append(data, byte(0))
-	data = append(data, packet...)
+	data = append(data, size...)
+	data = append(data, byte(0))
+	data = append(data, body...)
 
-	return data
+	return data, nil
 }
