@@ -1,40 +1,43 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net"
-	"strconv"
 	"sync"
 
 	"github.com/reconquest/ser-go"
 )
 
 var (
-	packetMaxSize = 1024
-	packetPrefix  = []byte{'C', 'U', 'R', 'E'}
+	packetBufferReadSize = 1024 * 4
+	packetPrefix         = []byte{'M', 'O', 'N', 'K', 0}
 )
 
-type Peer struct {
-	Source *net.IPNet
-	Peers  []*Peer
-}
-
 type Monk struct {
-	*sync.Mutex
+	mutex *sync.Mutex
 
 	port int
 	udp  net.PacketConn
 
 	networks []*net.IPNet
 
-	peers   []Peer
-	seeds   []Peer
-	seeding bool
+	peers      Peers
+	presencers Peers
 }
 
 func NewMonk(port int) *Monk {
 	return &Monk{
-		Mutex: &sync.Mutex{},
+		mutex: &sync.Mutex{},
 		port:  port,
+		peers: Peers{
+			mutex: &sync.Mutex{},
+		},
+		presencers: Peers{
+			mutex: &sync.Mutex{},
+		},
 	}
 }
 
@@ -43,7 +46,7 @@ func (monk *Monk) addNetwork(network *net.IPNet) {
 }
 
 func (monk *Monk) bind() error {
-	udp, err := net.ListenPacket("udp", ":"+strconv.Itoa(monk.port))
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{Port: monk.port})
 	if err != nil {
 		return err
 	}
@@ -69,33 +72,60 @@ func (monk *Monk) observe() {
 			continue
 		}
 
-		go monk.handle(remote, packet)
+		go monk.handle(remote.(*net.UDPAddr), packet)
 	}
 }
 
 func (monk *Monk) heartbeat() {
-	monk.broadcastLight()
+	monk.withLock(func() {
+		monk.presencers.cleanup(heartbeatInterval)
+	})
+
+	// try to find network that does not have presencer
+
+	networks := []string{}
+	for _, peer := range monk.presencers {
+		found := false
+		for _, network := range networks {
+			if network == peer.network {
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			networks = append(networks, peer.network)
+		}
+	}
+
+	networksOrphans := []string{}
+	for _, network := range monk.networks {
+		presencing := false
+		for _, presencingNetwork := range networks {
+			if presencingNetwork == network.String() {
+
+			}
+		}
+	}
+
+	monk.broadcastPresence()
 }
 
-func (monk *Monk) broadcastLight() {
+func (monk *Monk) broadcastPresence(target) {
 	network := []string{}
 	for _, ipnet := range monk.networks {
 		network = append(network, ipnet.Network())
 	}
 
-	packet := PacketLight{
+	packet := PacketPresence{
 		Network: network,
 	}
 
-	err := monk.broadcast(packet)
-	if err != nil {
-		errorh(err, "can't broadcast packet: %v", packet)
-		return
-	}
+	monk.broadcast(packet)
 }
 
 func (monk *Monk) read() (net.Addr, []byte, error) {
-	packet := make([]byte, packetMaxSize)
+	packet := make([]byte, packetBufferReadSize)
 
 	size, remote, err := monk.udp.ReadFrom(packet)
 	if err != nil {
@@ -105,46 +135,84 @@ func (monk *Monk) read() (net.Addr, []byte, error) {
 	return remote, packet[:size], nil
 }
 
-func (monk *Monk) handle(remote net.Addr, packet []byte) error {
-	debugf("remote: %s; packet: %s", remote, string(packet))
-
-	return nil
-}
-
-func (monk *Monk) broadcast(packet Serializable) error {
-	data := pack(packet)
-
+func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
+	mine := false
 	for _, network := range monk.networks {
-		address := getBroadcastIP(network)
-
-		debugf("broadcasting to %s", address)
-
-		_, err := monk.udp.WriteTo(
-			data,
-			&net.UDPAddr{IP: address, Port: monk.port},
-		)
-		if err != nil {
-			return ser.Errorf(
-				err, "can't broadcast to %s:%d (network: %s)",
-				address, monk.port, network,
-			)
+		if bytes.Compare(remote.IP, network.IP) == 0 {
+			mine = true
+			break
 		}
 	}
 
-	return nil
+	if mine {
+		debugf("mine packet, skipping")
+		return
+	}
+
+	packet, err := unpack(data)
+	if err != nil {
+		errorh(
+			err,
+			"unable to unpack packet: %s", data,
+		)
+		return
+	}
+
+	// TODO: some day here can be not only presence, so be aware here can be
+	// panic if unpack returned not PacketPresence
+	presence := packet.(PacketPresence)
+	fmt.Printf("XXXXXX monk.go:136 presence: %#v\n", presence)
+
+	return
+}
+
+func (monk *Monk) broadcast(network *net.IPNet, packet Serializable) {
+	data := pack(packet)
+
+	address := getBroadcastIP(network)
+
+	debugf("broadcasting to %s", address)
+
+	_, err := monk.udp.WriteTo(
+		data,
+		&net.UDPAddr{IP: address, Port: monk.port},
+	)
+	if err != nil {
+		errorh(
+			err,
+			"unable to send packet to %s:%d (network: %s)",
+			address, monk.port, network.Network(),
+		)
+		return
+	}
 }
 
 func pack(data Serializable) []byte {
-	serialized := data.Serialize()
+	return append(packetPrefix, data.Serialize()...)
+}
 
-	size := []byte(strconv.Itoa(len(serialized)))
+func unpack(packet []byte) (Serializable, error) {
+	if !bytes.HasPrefix(packet, append(packetPrefix, byte(0))) {
+		return nil, errors.New("packet does not contain specific signature")
+	}
 
-	packet := []byte{}
-	packet = append(packet, packetPrefix...)
-	packet = append(packet, byte(0))
-	packet = append(packet, size...)
-	packet = append(packet, byte(0))
-	packet = append(packet, serialized...)
+	packet = packet[len(packetPrefix):]
 
-	return packet
+	var presence PacketPresence
+
+	err := json.Unmarshal(packet, &presence)
+	if err != nil {
+		return nil, ser.Errorf(
+			err, "unable to unmarshal packet data",
+		)
+	}
+
+	return presence, nil
+}
+
+func (monk *Monk) withLock(fun func()) {
+	monk.mutex.Lock()
+	defer monk.mutex.Unlock()
+
+	fun()
 }

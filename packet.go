@@ -8,11 +8,11 @@ type Serializable interface {
 	Serialize() []byte
 }
 
-type PacketLight struct {
+type PacketPresence struct {
 	Network []string `json:"network"`
 }
 
-func (packet PacketLight) Serialize() []byte {
+func (packet PacketPresence) Serialize() []byte {
 	marshaled, err := json.Marshal(packet)
 	if err != nil {
 		panic(err)
