@@ -22,14 +22,23 @@ type Monk struct {
 	port int
 	udp  net.PacketConn
 
-	networks []*net.IPNet
+	networks Networks
 
-	peers      Peers
-	presencers Peers
+	peers       Peers
+	presencers  Peers
+	connections Peers
+
+	// TODO: try to avoid this
+	limits struct {
+		connections struct {
+			min int
+			max int
+		}
+	}
 }
 
-func NewMonk(port int) *Monk {
-	return &Monk{
+func NewMonk(port, min, max int) *Monk {
+	monk := &Monk{
 		mutex: &sync.Mutex{},
 		port:  port,
 		peers: Peers{
@@ -39,9 +48,14 @@ func NewMonk(port int) *Monk {
 			mutex: &sync.Mutex{},
 		},
 	}
+
+	monk.limits.connections.min = min
+	monk.limits.connections.max = max
+
+	return monk
 }
 
-func (monk *Monk) addNetwork(network *net.IPNet) {
+func (monk *Monk) addNetwork(network Network) {
 	monk.networks = append(monk.networks, network)
 }
 
@@ -77,51 +91,60 @@ func (monk *Monk) observe() {
 }
 
 func (monk *Monk) heartbeat() {
+	var (
+		beatingNetworks = []string{}
+		silentNetworks  = []Network{}
+	)
+
 	monk.withLock(func() {
-		monk.presencers.cleanup(heartbeatInterval)
+		monk.presencers.cleanup(heartbeatInterval * 2)
+
+		beatingNetworks = monk.presencers.getNetworks()
 	})
 
-	// try to find network that does not have presencer
+	// try to find network that does not have a presencer
 
-	networks := []string{}
-	for _, peer := range monk.presencers {
-		found := false
-		for _, network := range networks {
-			if network == peer.network {
-				found = true
+	for _, network := range monk.networks {
+		beating := false
+		for _, beatingNetwork := range beatingNetworks {
+			if network.String() == beatingNetwork {
+				beating = true
 				break
 			}
 		}
 
-		if !found {
-			networks = append(networks, peer.network)
+		if !beating {
+			silentNetworks = append(silentNetworks, network)
 		}
 	}
 
-	networksOrphans := []string{}
-	for _, network := range monk.networks {
-		presencing := false
-		for _, presencingNetwork := range networks {
-			if presencingNetwork == network.String() {
+	go monk.broadcastPresence(silentNetworks)
+}
 
+func (monk *Monk) broadcastPresence(networks Networks) {
+	packet := PacketPresence{
+		Networks: monk.networks.Strings(),
+		Peers:    monk.getPeersTable(),
+	}
+
+	for _, network := range networks {
+		go monk.broadcast(network, packet)
+
+	}
+}
+
+func (monk *Monk) getPeersTable() map[string][]string {
+	table := map[string][]string{}
+	for _, peer := range monk.peers.peers {
+		for _, network := range peer.networks {
+			_, ok := table[network]
+			if !ok {
+				table[network] = []string{peer.ip}
+			} else {
+				table[network] = append(table[network], peer.ip)
 			}
 		}
 	}
-
-	monk.broadcastPresence()
-}
-
-func (monk *Monk) broadcastPresence(target) {
-	network := []string{}
-	for _, ipnet := range monk.networks {
-		network = append(network, ipnet.Network())
-	}
-
-	packet := PacketPresence{
-		Network: network,
-	}
-
-	monk.broadcast(packet)
 }
 
 func (monk *Monk) read() (net.Addr, []byte, error) {
@@ -166,10 +189,10 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 	return
 }
 
-func (monk *Monk) broadcast(network *net.IPNet, packet Serializable) {
+func (monk *Monk) broadcast(network Network, packet Serializable) {
 	data := pack(packet)
 
-	address := getBroadcastIP(network)
+	address := network.getBroadcastAddress()
 
 	debugf("broadcasting to %s", address)
 

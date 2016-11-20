@@ -1,8 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
-	"encoding/json"
 	"net"
 	"os"
 	"strconv"
@@ -19,19 +17,21 @@ var (
 
 var (
 	version = "[manual build]"
-	usage   = "cure " + version + `
+	usage   = "monk " + version + `
 
 blah
 
 Usage:
-  cure [options]
-  cure -h | --help
-  cure --version
+  monk [options]
+  monk -h | --help
+  monk --version
 
 Options:
-  -p --port <port>  Specify port [default: 12345].
-  -h --help         Show this screen.
-  --version         Show version.
+  -p --port <port>           Specify port [default: 12345].
+  --min-connections <peers>  Specify count of minimum connections [default: 16].
+  --max-connections <peers>  Specify count of maximum connections [default: 32].
+  -h --help                  Show this screen.
+  --version                  Show version.
 `
 )
 
@@ -56,10 +56,12 @@ func main() {
 	logger.SetLevel(lorg.LevelDebug)
 
 	var (
-		port, _ = strconv.Atoi(args["--port"].(string))
+		port, _           = strconv.Atoi(args["--port"].(string))
+		minConnections, _ = strconv.Atoi(args["--min-connections"].(string))
+		maxConnections, _ = strconv.Atoi(args["--max-connections"].(string))
 	)
 
-	monk := NewMonk(port)
+	monk := NewMonk(port, minConnections, maxConnections)
 
 	err := monk.bind()
 	if err != nil {
@@ -71,7 +73,7 @@ func main() {
 			continue
 		}
 
-		monk.addNetwork(network)
+		monk.addNetwork(Network{network})
 	}
 
 	time.Sleep(time.Second)
@@ -85,22 +87,6 @@ func main() {
 	}()
 
 	select {}
-}
-
-func getBroadcastIP(network *net.IPNet) net.IP {
-	ip := make(net.IP, len(network.IP.To4()))
-	binary.BigEndian.PutUint32(
-		ip,
-		binary.BigEndian.Uint32(network.IP.To4())|^binary.BigEndian.Uint32(
-			net.IP(network.Mask).To4(),
-		),
-	)
-	return ip
-}
-
-func encode(message interface{}) []byte {
-	encoded, _ := json.Marshal(message)
-	return encoded
 }
 
 func getNetworks() []*net.IPNet {

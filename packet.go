@@ -1,15 +1,13 @@
 package main
 
-import (
-	"encoding/json"
-)
+import "encoding/json"
 
 type Serializable interface {
 	Serialize() []byte
 }
 
 type PacketPresence struct {
-	Network []string `json:"network"`
+	Networks []string `json:"networks"`
 }
 
 func (packet PacketPresence) Serialize() []byte {
