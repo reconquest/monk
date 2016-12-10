@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
+	"reflect"
 	"sync"
 	"time"
 
+	"github.com/godbus/dbus"
 	"github.com/reconquest/ser-go"
 )
 
@@ -18,6 +21,7 @@ var (
 
 type Monk struct {
 	mutex *sync.Mutex
+	dbus  *dbus.Conn
 
 	port int
 	udp  net.PacketConn
@@ -139,13 +143,23 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 		peer = &Peer{
 			ip:      remote.IP,
 			network: remote.Network(),
+			data:    presence,
+			last:    time.Now(),
 		}
 
 		monk.peers.add(peer)
-	}
 
-	peer.data = presence
-	peer.last = time.Now()
+		monk.emit(peer)
+	} else {
+		equal := reflect.DeepEqual(peer.data, presence)
+
+		peer.data = presence
+		peer.last = time.Now()
+
+		if equal {
+			monk.emit(peer)
+		}
+	}
 
 	return
 }
@@ -169,6 +183,10 @@ func (monk *Monk) broadcast(network Network, packet Serializable) {
 		)
 		return
 	}
+}
+
+func (monk *Monk) emit(peer *Peer) {
+	fmt.Printf("XXXXXX monk.go:175 peer: %#v\n", peer)
 }
 
 func pack(data Serializable) []byte {

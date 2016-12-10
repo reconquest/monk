@@ -2,17 +2,18 @@ package main
 
 import (
 	"net"
-	"os"
 	"strconv"
 	"time"
 
+	"github.com/godbus/dbus"
 	"github.com/kovetskiy/godocs"
 	"github.com/kovetskiy/lorg"
 	"github.com/reconquest/colorgful"
 )
 
-var (
-	exit = os.Exit
+const (
+	dbusInterface = "com.github.reconquest.monk"
+	dbusPath      = "/com/github/reconquest/monk"
 )
 
 var (
@@ -61,7 +62,13 @@ func main() {
 
 	monk := NewMonk(port)
 
-	err := monk.bind()
+	var err error
+	monk.dbus, err = dbus.SessionBus()
+	if err != nil {
+		fatalh(err, "can't create dbus session")
+	}
+
+	err = monk.bind()
 	if err != nil {
 		fatalln(err)
 	}
