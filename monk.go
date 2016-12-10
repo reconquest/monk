@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/reconquest/ser-go"
 )
@@ -24,33 +24,17 @@ type Monk struct {
 
 	networks Networks
 
-	peers       Peers
-	presencers  Peers
-	connections Peers
-
-	// TODO: try to avoid this
-	limits struct {
-		connections struct {
-			min int
-			max int
-		}
-	}
+	peers Peers
 }
 
-func NewMonk(port, min, max int) *Monk {
+func NewMonk(port int) *Monk {
 	monk := &Monk{
 		mutex: &sync.Mutex{},
 		port:  port,
 		peers: Peers{
 			mutex: &sync.Mutex{},
 		},
-		presencers: Peers{
-			mutex: &sync.Mutex{},
-		},
 	}
-
-	monk.limits.connections.min = min
-	monk.limits.connections.max = max
 
 	return monk
 }
@@ -91,59 +75,23 @@ func (monk *Monk) observe() {
 }
 
 func (monk *Monk) heartbeat() {
-	var (
-		beatingNetworks = []string{}
-		silentNetworks  = []Network{}
-	)
-
 	monk.withLock(func() {
-		monk.presencers.cleanup(heartbeatInterval * 2)
-
-		beatingNetworks = monk.presencers.getNetworks()
+		monk.peers.cleanup(heartbeatInterval * 2)
 	})
 
 	// try to find network that does not have a presencer
 
-	for _, network := range monk.networks {
-		beating := false
-		for _, beatingNetwork := range beatingNetworks {
-			if network.String() == beatingNetwork {
-				beating = true
-				break
-			}
-		}
-
-		if !beating {
-			silentNetworks = append(silentNetworks, network)
-		}
-	}
-
-	go monk.broadcastPresence(silentNetworks)
+	go monk.broadcastPresence(monk.networks)
 }
 
 func (monk *Monk) broadcastPresence(networks Networks) {
 	packet := PacketPresence{
-		Networks: monk.networks.Strings(),
-		Peers:    monk.getPeersTable(),
+		"key": "value",
 	}
 
 	for _, network := range networks {
 		go monk.broadcast(network, packet)
 
-	}
-}
-
-func (monk *Monk) getPeersTable() map[string][]string {
-	table := map[string][]string{}
-	for _, peer := range monk.peers.peers {
-		for _, network := range peer.networks {
-			_, ok := table[network]
-			if !ok {
-				table[network] = []string{peer.ip}
-			} else {
-				table[network] = append(table[network], peer.ip)
-			}
-		}
 	}
 }
 
@@ -184,7 +132,20 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 	// TODO: some day here can be not only presence, so be aware here can be
 	// panic if unpack returned not PacketPresence
 	presence := packet.(PacketPresence)
-	fmt.Printf("XXXXXX monk.go:136 presence: %#v\n", presence)
+
+	var peer *Peer
+	var ok bool
+	if peer, ok = monk.peers.find(remote.IP, remote.Network()); !ok {
+		peer = &Peer{
+			ip:      remote.IP,
+			network: remote.Network(),
+		}
+
+		monk.peers.add(peer)
+	}
+
+	peer.data = presence
+	peer.last = time.Now()
 
 	return
 }

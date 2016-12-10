@@ -7,10 +7,10 @@ import (
 )
 
 type Peer struct {
-	ip       net.IP
-	networks []string
-	last     time.Time
-	peers    []*Peer
+	ip      net.IP
+	network string
+	last    time.Time
+	data    map[string]interface{}
 }
 
 type Peers struct {
@@ -23,6 +23,19 @@ func (peers *Peers) add(peer *Peer) {
 	defer peers.mutex.Unlock()
 
 	peers.peers = append(peers.peers, peer)
+}
+
+func (peers *Peers) find(ip net.IP, network string) (*Peer, bool) {
+	peers.mutex.Lock()
+	defer peers.mutex.Unlock()
+
+	for _, peer := range peers.peers {
+		if peer.ip.String() == ip.String() && peer.network == network {
+			return peer, true
+		}
+	}
+
+	return nil, false
 }
 
 func (peers *Peers) remove(peer *Peer) {
@@ -62,29 +75,4 @@ func (peers *Peers) len() int {
 	defer peers.mutex.Unlock()
 
 	return len(peers.peers)
-}
-
-func (peers *Peers) getNetworks() []string {
-	peers.mutex.Lock()
-	defer peers.mutex.Unlock()
-
-	networks := []string{}
-
-	for _, peer := range peers.peers {
-		for _, network := range peer.networks {
-			found := false
-			for _, already := range networks {
-				if already == network {
-					found = true
-					break
-				}
-			}
-
-			if !found {
-				networks = append(networks, network)
-			}
-		}
-	}
-
-	return networks
 }

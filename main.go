@@ -28,8 +28,6 @@ Usage:
 
 Options:
   -p --port <port>           Specify port [default: 12345].
-  --min-connections <peers>  Specify count of minimum connections [default: 16].
-  --max-connections <peers>  Specify count of maximum connections [default: 32].
   -h --help                  Show this screen.
   --version                  Show version.
 `
@@ -56,12 +54,12 @@ func main() {
 	logger.SetLevel(lorg.LevelDebug)
 
 	var (
-		port, _           = strconv.Atoi(args["--port"].(string))
-		minConnections, _ = strconv.Atoi(args["--min-connections"].(string))
-		maxConnections, _ = strconv.Atoi(args["--max-connections"].(string))
+		port, _ = strconv.Atoi(args["--port"].(string))
+		//minConnections, _ = strconv.Atoi(args["--min-connections"].(string))
+		//maxConnections, _ = strconv.Atoi(args["--max-connections"].(string))
 	)
 
-	monk := NewMonk(port, minConnections, maxConnections)
+	monk := NewMonk(port)
 
 	err := monk.bind()
 	if err != nil {

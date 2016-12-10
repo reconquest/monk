@@ -6,9 +6,7 @@ type Serializable interface {
 	Serialize() []byte
 }
 
-type PacketPresence struct {
-	Networks []string `json:"networks"`
-}
+type PacketPresence map[string]interface{}
 
 func (packet PacketPresence) Serialize() []byte {
 	marshaled, err := json.Marshal(packet)
