@@ -1,0 +1,22 @@
+#!/bin/bash
+
+:sudo() {
+    echo "!! sudo: ${@}"
+    sudo "${@}"
+}
+
+BRIDGE=nspawn${RANDOM}
+trap "{ sudo ip link set $BRIDGE down; sudo brctl delbr ${BRIDGE}; }" EXIT
+:sudo brctl addbr ${BRIDGE}
+:sudo ip link set $BRIDGE up
+:sudo ip addr add 169.254.0.$((RANDOM%255))/16 dev ${BRIDGE}
+
+dir=$(readlink -f .)
+bin=$dir/monk
+
+:sudo systemd-nspawn \
+    --bind "$(readlink -f . )" \
+    --quiet \
+    -D ~/container \
+    --network-bridge=${BRIDGE} -n \
+    -b

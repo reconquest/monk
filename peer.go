@@ -1,49 +1,64 @@
 package main
 
 import (
-	"net"
+	"bytes"
 	"sync"
 	"time"
 )
 
 type Peer struct {
-	ip      net.IP
-	network string
-	last    time.Time
-	data    map[string]interface{}
+	IP          string      `json:"ip"`
+	Trusted     bool        `json:"trusted"`
+	Machine     string      `json:"machine"`
+	Fingerprint Fingerprint `json:"fingerprint"`
+	LastSeen    time.Time   `json:"last_seen"`
+	data        map[string]interface{}
 }
 
 type Peers struct {
-	peers []*Peer
+	peers []Peer
 	mutex *sync.Mutex
 }
 
-func (peers *Peers) add(peer *Peer) {
+func (peer *Peer) String() string {
+	return peer.Machine + " " + peer.IP + " " + peer.Fingerprint.String()
+}
+
+func (peers *Peers) add(peer Peer) {
 	peers.mutex.Lock()
 	defer peers.mutex.Unlock()
 
 	peers.peers = append(peers.peers, peer)
 }
 
-func (peers *Peers) find(ip net.IP, network string) (*Peer, bool) {
+func (peers *Peers) updateLastSeen(
+	ip string,
+	fingerprint Fingerprint,
+	id string,
+) bool {
 	peers.mutex.Lock()
 	defer peers.mutex.Unlock()
 
-	for _, peer := range peers.peers {
-		if peer.ip.String() == ip.String() && peer.network == network {
-			return peer, true
+	for i, peer := range peers.peers {
+		if peer.IP == ip &&
+			bytes.Compare(fingerprint, peer.Fingerprint) == 0 &&
+			peer.Machine == id {
+			peers.peers[i].LastSeen = time.Now()
+			return true
 		}
 	}
 
-	return nil, false
+	return false
 }
 
-func (peers *Peers) remove(peer *Peer) {
+func (peers *Peers) remove(peer Peer) {
 	peers.mutex.Lock()
 	defer peers.mutex.Unlock()
 
-	for index, added := range peers.peers {
-		if added == peer {
+	for index, known := range peers.peers {
+		if peer.IP == known.IP &&
+			bytes.Compare(peer.Fingerprint, known.Fingerprint) == 0 &&
+			peer.Machine == known.Machine {
 			peers.peers = append(
 				peers.peers[:index],
 				peers.peers[index+1:]...,
@@ -58,9 +73,9 @@ func (peers *Peers) cleanup(timeout time.Duration) {
 	peers.mutex.Lock()
 	defer peers.mutex.Unlock()
 
-	clean := []*Peer{}
+	clean := []Peer{}
 	for _, peer := range peers.peers {
-		if time.Now().Sub(peer.last) > timeout {
+		if time.Now().Sub(peer.LastSeen) > timeout {
 			continue
 		}
 
@@ -75,4 +90,13 @@ func (peers *Peers) len() int {
 	defer peers.mutex.Unlock()
 
 	return len(peers.peers)
+}
+
+func (peers *Peers) get() []Peer {
+	peers.mutex.Lock()
+	defer peers.mutex.Unlock()
+
+	data := make([]Peer, len(peers.peers))
+	copy(data, peers.peers)
+	return data
 }

@@ -1,41 +1,47 @@
 package main
 
 import (
-	"net"
-	"strconv"
-	"time"
+	"fmt"
+	"os"
 
-	"github.com/godbus/dbus"
-	"github.com/kovetskiy/godocs"
+	"github.com/docopt/docopt-go"
 	"github.com/kovetskiy/lorg"
 	"github.com/reconquest/colorgful"
 )
 
-const (
-	dbusInterface = "com.github.reconquest.monk"
-	dbusPath      = "/com/github/reconquest/monk"
+var (
+	defaultSocketPath = fmt.Sprintf("/var/run/user/%d/monk.sock", os.Getuid())
 )
 
 var (
 	version = "[manual build]"
-	usage   = "monk " + version + `
+	usage   = "monk " + version + os.ExpandEnv(`
 
 blah
 
 Usage:
-  monk [options]
+  monk [options] [--interface <prefix>]... daemon
+  monk [options] peers [-f]
+  monk [options] trust <machine>
+  monk [options] stream [<machine>]
+  monk [options] fingerprint
   monk -h | --help
   monk --version
 
 Options:
-  -p --port <port>           Specify port [default: 12345].
-  -h --help                  Show this screen.
-  --version                  Show version.
-`
-)
-
-var (
-	heartbeatInterval = time.Millisecond * 300
+  -s --socket <path>            Listen and serve specified unix socket. Used for
+                                 internal purposes only.
+                                 [default: `+defaultSocketPath+`]
+  -f --fingerprint              Show peers' fingerprints.
+  -p --port <port>              Specify port [default: 12345].
+  -i --interface <prefix>       Specify network interface to use.
+  --data-dir <path>             Directory with sensitive data.
+                                 [default: $HOME/.config/monk/]
+  --stream-buffer-size <bytes>  Max buffer size for streaming.
+                                 [default: 536870912]
+  -h --help                     Show this screen.
+  --version                     Show version.
+`)
 )
 
 var (
@@ -43,7 +49,10 @@ var (
 )
 
 func main() {
-	args := godocs.MustParse(usage, version, godocs.UsePager)
+	args, err := docopt.Parse(usage, nil, true, version, false)
+	if err != nil {
+		panic(err)
+	}
 
 	logger.SetFormat(
 		colorgful.MustApplyDefaultTheme(
@@ -52,59 +61,13 @@ func main() {
 		),
 	)
 
+	logger.SetIndentLines(true)
+
 	logger.SetLevel(lorg.LevelDebug)
 
-	var (
-		port, _ = strconv.Atoi(args["--port"].(string))
-		//minConnections, _ = strconv.Atoi(args["--min-connections"].(string))
-		//maxConnections, _ = strconv.Atoi(args["--max-connections"].(string))
-	)
-
-	monk := NewMonk(port)
-
-	var err error
-	monk.dbus, err = dbus.SessionBus()
-	if err != nil {
-		fatalh(err, "can't create dbus session")
+	if args["daemon"].(bool) {
+		handleDaemon(args)
+	} else {
+		handleClient(args)
 	}
-
-	err = monk.bind()
-	if err != nil {
-		fatalln(err)
-	}
-
-	for _, network := range getNetworks() {
-		if network.IP.To4() == nil {
-			continue
-		}
-
-		monk.addNetwork(Network{network})
-	}
-
-	time.Sleep(time.Second)
-
-	go monk.observe()
-
-	go func() {
-		for range time.Tick(heartbeatInterval) {
-			monk.heartbeat()
-		}
-	}()
-
-	select {}
-}
-
-func getNetworks() []*net.IPNet {
-	networks := []*net.IPNet{}
-
-	addresses, _ := net.InterfaceAddrs()
-	for _, address := range addresses {
-		if address.(*net.IPNet).IP.IsLoopback() {
-			continue
-		}
-
-		networks = append(networks, address.(*net.IPNet))
-	}
-
-	return networks
 }
