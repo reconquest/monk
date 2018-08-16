@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 
 	"github.com/reconquest/karma-go"
@@ -47,34 +46,13 @@ func (monk *Monk) handleConnectStream(query PacketQueryStream) (Packetable, erro
 		)
 	}
 
-	var response PacketEncryptConnection
-	err = client.Query(PacketEncryptConnection{
-		ID:          monk.machine,
-		Fingerprint: monk.security.Fingerprint,
-	}, &response)
+	err = client.Encrypt(monk.machine, monk.security)
 	if err != nil {
 		return nil, karma.Format(
 			err,
-			"unable to query for encryption",
+			"unable to establish tls with peer",
 		)
 	}
-
-	secured := tls.Client(client.conn, &tls.Config{
-		Certificates:       []tls.Certificate{monk.security.X509KeyPair},
-		InsecureSkipVerify: true,
-	})
-
-	infof("stream: establishing tls encryption with %s", peer.Machine)
-
-	err = secured.Handshake()
-	if err != nil {
-		return nil, karma.Format(
-			err,
-			"unable to complete handshake with remote server",
-		)
-	}
-
-	infof("stream: handshake completed with %s", peer.Machine)
 
 	pipe, err := StartPipe(monk.dataDir)
 	if err != nil {
@@ -87,15 +65,15 @@ func (monk *Monk) handleConnectStream(query PacketQueryStream) (Packetable, erro
 	go func() {
 		err := pipe.WaitConnect()
 		if err != nil {
-			secured.Close()
+			client.Close()
 			pipe.Close()
 			errorh(err, "unable to accept pipe connection")
 			return
 		}
 
 		communicate(
-			pipe, secured,
-			secured, pipe,
+			pipe, client.secured,
+			client.secured, pipe,
 		)
 	}()
 

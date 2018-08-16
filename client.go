@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"net"
 	"sync"
@@ -14,6 +15,8 @@ type Client struct {
 	conn    net.Conn
 	encoder *json.Encoder
 	decoder *json.Decoder
+
+	secured net.Conn
 
 	sync.Mutex
 }
@@ -85,6 +88,43 @@ func (client *Client) Query(query Packetable, reply Packetable) error {
 			"unable to bind reply as %s", reply.Signature(),
 		)
 	}
+
+	return nil
+}
+
+func (client *Client) Encrypt(id string, security *SecureLayer) error {
+	var response PacketEncryptConnection
+	err := client.Query(PacketEncryptConnection{
+		ID:          id,
+		Fingerprint: security.Fingerprint,
+	}, &response)
+	if err != nil {
+		return karma.Format(
+			err,
+			"unable to query for encryption",
+		)
+	}
+
+	secured := tls.Client(client.conn, &tls.Config{
+		Certificates:       []tls.Certificate{security.X509KeyPair},
+		InsecureSkipVerify: true,
+	})
+
+	infof("stream: establishing tls encryption with %s", id)
+
+	err = secured.Handshake()
+	if err != nil {
+		return karma.Format(
+			err,
+			"unable to complete handshake with remote server",
+		)
+	}
+
+	infof("stream: handshake completed with %s", id)
+
+	client.secured = secured
+	client.encoder = json.NewEncoder(secured)
+	client.decoder = json.NewDecoder(secured)
 
 	return nil
 }
