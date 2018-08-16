@@ -104,7 +104,7 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 		presence.ID,
 	)
 	if updated {
-		logger.Tracef(
+		logger.Debugf(
 			"presence: %s %s %s",
 			presence.ID,
 			remote.IP,
@@ -132,7 +132,7 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 }
 
 func (monk *Monk) broadcast(network Network, data Packetable) {
-	tracef(
+	debugf(
 		"broadcasting to %s:%d dev %s",
 		network.BroadcastAddress,
 		monk.port,
