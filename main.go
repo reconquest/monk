@@ -39,6 +39,7 @@ Options:
                                  [default: $HOME/.config/monk/]
   --stream-buffer-size <bytes>  Max buffer size for streaming.
                                  [default: 536870912]
+  --debug                       Enable debug mode.
   -h --help                     Show this screen.
   --version                     Show version.
 `)
@@ -63,7 +64,9 @@ func main() {
 
 	logger.SetIndentLines(true)
 
-	logger.SetLevel(lorg.LevelDebug)
+	if args["--debug"].(bool) {
+		logger.SetLevel(lorg.LevelDebug)
+	}
 
 	if args["daemon"].(bool) {
 		handleDaemon(args)

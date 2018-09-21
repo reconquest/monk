@@ -1,9 +1,12 @@
 package main
 
+import "time"
+
 const SignaturePresence = "presence"
 
 type PacketPresence struct {
 	ID          string      `json:"id"`
+	At          time.Time   `json:"at"`
 	Fingerprint Fingerprint `json:"fingerprint"`
 }
 

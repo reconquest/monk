@@ -1,0 +1,10 @@
+[Unit]
+Description=Monk daemon
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/monk daemon
+Restart=always
+
+[Install]
+WantedBy=basic.target

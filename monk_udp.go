@@ -98,17 +98,26 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 		return
 	}
 
+	var latency time.Duration
+	if presence.At.IsZero() {
+		latency = time.Duration(0)
+	} else {
+		latency = time.Since(presence.At)
+	}
+
 	updated := monk.peers.updateLastSeen(
 		remote.IP.String(),
 		presence.Fingerprint,
 		presence.ID,
+		latency,
 	)
 	if updated {
 		logger.Debugf(
-			"presence: %s %s %s",
+			"presence: %s %s %s %v",
 			presence.ID,
 			remote.IP,
 			presence.Fingerprint,
+			latency,
 		)
 	} else {
 		peer := Peer{
@@ -116,15 +125,17 @@ func (monk *Monk) handle(remote *net.UDPAddr, data []byte) {
 			Machine:     presence.ID,
 			Fingerprint: presence.Fingerprint,
 			LastSeen:    time.Now(),
+			Latency:     latency,
 		}
 
 		monk.peers.add(peer)
 
 		logger.Infof(
-			"new monk: %s %s %s",
+			"new monk: %s %s %s %v",
 			presence.ID,
 			remote.IP.String(),
 			presence.Fingerprint,
+			latency,
 		)
 	}
 

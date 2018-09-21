@@ -7,11 +7,12 @@ import (
 )
 
 type Peer struct {
-	IP          string      `json:"ip"`
-	Trusted     bool        `json:"trusted"`
-	Machine     string      `json:"machine"`
-	Fingerprint Fingerprint `json:"fingerprint"`
-	LastSeen    time.Time   `json:"last_seen"`
+	IP          string        `json:"ip"`
+	Trusted     bool          `json:"trusted"`
+	Machine     string        `json:"machine"`
+	Fingerprint Fingerprint   `json:"fingerprint"`
+	LastSeen    time.Time     `json:"last_seen"`
+	Latency     time.Duration `json:"latency"`
 	data        map[string]interface{}
 }
 
@@ -35,6 +36,7 @@ func (peers *Peers) updateLastSeen(
 	ip string,
 	fingerprint Fingerprint,
 	id string,
+	latency time.Duration,
 ) bool {
 	peers.mutex.Lock()
 	defer peers.mutex.Unlock()
@@ -44,6 +46,7 @@ func (peers *Peers) updateLastSeen(
 			bytes.Compare(fingerprint, peer.Fingerprint) == 0 &&
 			peer.Machine == id {
 			peers.peers[i].LastSeen = time.Now()
+			peers.peers[i].Latency = latency
 			return true
 		}
 	}

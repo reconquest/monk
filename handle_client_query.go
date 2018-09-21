@@ -10,12 +10,12 @@ func handleClientQuery(client *Client, withFingerprint bool) error {
 	var peers PacketPeers
 	err := client.Query(PacketQueryPeers{}, &peers)
 	if err != nil {
-		return  err
+		return err
 	}
 
-	formatting := "%s\t%s\t%s\n"
+	formatting := "%s\t%s\t%s\t%s\n"
 	if withFingerprint {
-		formatting = "%s\t%s\t%s\t%s\n"
+		formatting = "%s\t%s\t%s\t%s\t%s\n"
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 1, 2, ' ', 0)
@@ -23,6 +23,7 @@ func handleClientQuery(client *Client, withFingerprint bool) error {
 		values := []interface{}{
 			peer.Machine,
 			peer.IP,
+			peer.Latency,
 		}
 
 		if withFingerprint {
