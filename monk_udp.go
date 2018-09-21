@@ -51,6 +51,7 @@ func (monk *Monk) broadcastPresence() {
 	for {
 		networks := monk.getNetworks()
 		for _, network := range networks {
+			packet.At = time.Now()
 			monk.broadcast(network, packet)
 		}
 
